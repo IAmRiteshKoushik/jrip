@@ -1,10 +1,10 @@
-use std::{fs, path::PathBuf};
+use std::{fs, path::PathBuf, process::Command};
 
 use iced::{
     Border, Element,
     Length::Fill,
     Shadow, Task,
-    widget::{button, column, row, text},
+    widget::{button, column, horizontal_rule, row, text},
     window,
 };
 
@@ -12,6 +12,7 @@ use iced::{
 struct AppState {
     current_dir: PathBuf,
     current_files: Vec<(String, bool)>,
+    popup: Option<String>,
 }
 
 impl Default for AppState {
@@ -27,6 +28,7 @@ impl Default for AppState {
         AppState {
             current_dir,
             current_files,
+            popup: None,
         }
     }
 }
@@ -36,6 +38,8 @@ impl Default for AppState {
 enum Message {
     Exit,
     CD(PathBuf),
+    JRIP(PathBuf),
+    ClosePopup,
 }
 
 fn update(state: &mut AppState, message: Message) -> Task<Message> {
@@ -44,6 +48,38 @@ fn update(state: &mut AppState, message: Message) -> Task<Message> {
         Message::CD(path_buf) => {
             state.current_dir = path_buf;
             state.current_files = get_files(&state.current_dir);
+            Task::none()
+        }
+        Message::JRIP(path_buf) => {
+            if let Some(parent) = path_buf.parent() {
+                let mut new_file = parent.to_path_buf();
+                new_file.push("output.mp3");
+
+                if let Ok(output) = Command::new("ffmpeg")
+                    .args([
+                        "-i",
+                        path_buf.to_str().unwrap_or("/home"),
+                        "-vn",
+                        "-acodec",
+                        "libmp3lame",
+                        "-q:a",
+                        "4",
+                        new_file.to_str().unwrap_or("/home"),
+                    ])
+                    .status()
+                {
+                    if output.success() {
+                        state.popup =
+                            Some(String::from("audio has been ripped"))
+                    } else {
+                        state.popup = Some(String::from("failed to RIP audio"))
+                    }
+                }
+            }
+            Task::none()
+        }
+        Message::ClosePopup => {
+            state.popup = None;
             Task::none()
         }
     }
@@ -65,20 +101,37 @@ fn view(state: &AppState) -> Element<Message> {
             button(text("Exit").size(24)).on_press(Message::Exit)
         ]
         .spacing(8)
-    ];
+    ]
+    .spacing(2)
+    .padding(4);
+
+    content = content.push(horizontal_rule(2));
+
+    if let Some(pat) = &state.popup {
+        content = content.push(row![
+            text(pat).width(Fill),
+            button("close").on_press(Message::ClosePopup)
+        ]);
+    }
+
     for file in &state.current_files {
         let file_name = text(&file.0);
+        let mut file_path = state.current_dir.clone();
+        file_path.push(&file.0);
 
         // If the file is a directory, push a button in the content list
         if file.1 {
             content = content.push(
                 button(file_name)
                     .style(dir_button_style())
-                    .on_press(Message::Exit),
+                    .on_press(Message::CD(file_path)),
             );
         // If it is not a directory, then push the file_name in the content list
         } else {
-            content = content.push(file_name);
+            content = content.push(row![
+                file_name.width(Fill),
+                button(text("Jrip")).on_press(Message::JRIP(file_path)),
+            ]);
         }
     }
     content.into()
@@ -101,7 +154,9 @@ fn get_files(path: &PathBuf) -> Vec<(String, bool)> {
                     if dir_entry.path().is_dir() {
                         dirs.push((name.to_string(), true));
                     } else {
-                        files.push((name.to_string(), false));
+                        if name.ends_with("mkv") {
+                            files.push((name.to_string(), false));
+                        }
                     }
                 }
             }
