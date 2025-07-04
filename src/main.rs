@@ -1,9 +1,9 @@
 use std::{fs, path::PathBuf};
 
 use iced::{
-    Element,
+    Border, Element,
     Length::Fill,
-    Task,
+    Shadow, Task,
     widget::{button, column, row, text},
     window,
 };
@@ -35,11 +35,17 @@ impl Default for AppState {
 #[derive(Debug, Clone)]
 enum Message {
     Exit,
+    CD(PathBuf),
 }
 
-fn update(_state: &mut AppState, message: Message) -> Task<Message> {
+fn update(state: &mut AppState, message: Message) -> Task<Message> {
     match message {
         Message::Exit => window::get_latest().and_then(window::close),
+        Message::CD(path_buf) => {
+            state.current_dir = path_buf;
+            state.current_files = get_files(&state.current_dir);
+            Task::none()
+        }
     }
 }
 
@@ -49,13 +55,31 @@ fn view(state: &AppState) -> Element<Message> {
             text(state.current_dir.to_str().unwrap_or("unknown directory"))
                 .size(24)
                 .width(Fill),
-            button(text("Up").size(24)).on_press(Message::Exit),
+            button(text("Up").size(24)).on_press(Message::CD(
+                state
+                    .current_dir
+                    .parent()
+                    .unwrap_or(&state.current_dir)
+                    .to_path_buf()
+            )),
             button(text("Exit").size(24)).on_press(Message::Exit)
         ]
         .spacing(8)
     ];
     for file in &state.current_files {
-        content = content.push(text(&file.0));
+        let file_name = text(&file.0);
+
+        // If the file is a directory, push a button in the content list
+        if file.1 {
+            content = content.push(
+                button(file_name)
+                    .style(dir_button_style())
+                    .on_press(Message::Exit),
+            );
+        // If it is not a directory, then push the file_name in the content list
+        } else {
+            content = content.push(file_name);
+        }
     }
     content.into()
 }
@@ -86,4 +110,13 @@ fn get_files(path: &PathBuf) -> Vec<(String, bool)> {
 
     dirs.append(&mut files);
     dirs
+}
+
+fn dir_button_style() -> impl Fn(&iced::Theme, button::Status) -> button::Style {
+    |_t, _e| button::Style {
+        background: None,
+        text_color: iced::Color::from_rgb(3.0 / 255.0, 161.0 / 255.0, 252.0 / 255.0),
+        border: Border::default(),
+        shadow: Shadow::default(),
+    }
 }
